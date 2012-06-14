@@ -59,22 +59,18 @@ module ActsAsCached
       missed_records = Array(fetch_cachable_data(needed_ids))
 
       # Cache the missed records
-      missed_records.each { |missed_record| missed_record.set_cache(options) }
+      missed_records.each do |missed_record|
+        set_cache(missed_record.id, missed_record, options)
+      end
 
       # Return all records as a hash indexed by object cache_id
-      (hits.values + missed_records).index_by(&:cache_id)
+      (hits.values + missed_records).index_by { |record| cache_key(record.id) }
     end
 
     # simple wrapper for get_caches that
     # returns the items as an ordered array
     def get_caches_as_list(*args)
-      cache_ids = args.last.is_a?(Hash) ? args.first : args
-      cache_ids = [cache_ids].flatten
-      hash      = get_caches(*args)
-
-      cache_ids.map do |key|
-        hash[key]
-      end
+      get_caches(*args).values
     end
 
     def set_cache(cache_id, value, options = nil)
@@ -132,9 +128,17 @@ module ActsAsCached
     def caches(method, options = {})
       if options.keys.include?(:with)
         with = options.delete(:with)
-        get_cache("#{method}:#{with}", options) { send(method, with) }
+        get_cache("#{method}:#{with}", options) do
+          args = [with]
+          args << cache_options.dup unless cache_options.blank?
+          send(method, *args)
+        end
       elsif withs = options.delete(:withs)
-        get_cache("#{method}:#{withs}", options) { send(method, *withs) }
+        get_cache("#{method}:#{withs}", options) do
+          args = withs.dup
+          args << cache_options.dup unless cache_options.blank?
+          send(method, *args)
+        end
       else
         get_cache(method, options) { send(method) }
       end
@@ -230,9 +234,17 @@ module ActsAsCached
       key = "#{self.cache_key}/#{method}"
       if options.keys.include?(:with)
         with = options.delete(:with)
-        self.class.get_cache("#{key}/#{with}", options) { send(method, with) }
+        self.class.get_cache("#{key}/#{with}", options) do
+          args = [with]
+          args << cache_options.dup unless cache_options.blank?
+          send(method, *args)
+        end
       elsif withs = options.delete(:withs)
-        self.class.get_cache("#{key}/#{withs}", options) { send(method, *withs) }
+        self.class.get_cache("#{key}/#{withs}", options) do
+          args = withs.dup
+          args << cache_options.dup unless cache_options.blank?
+          send(method, *args)
+        end
       else
         self.class.get_cache(key, options) { send(method) }
       end
