@@ -1,4 +1,33 @@
 module ActsAsCached
+  module Util
+    CLASS_KEY = :c
+    ATTRIBUTES_KEY = :a
+    
+    class << self
+      # serialize one record or an array of records before adding to the cache
+      def serialize(value)
+        if value.is_a? Array
+          {CLASS_KEY => value.class.name,
+           ATTRIBUTES_KEY => value.collect { |x| serialize(x) }}
+        else
+          {CLASS_KEY => value.class.name,
+           ATTRIBUTES_KEY => value.instance_variable_get(:@attributes)}
+        end
+      end
+
+      # deserialize a cached record or array of records.
+      def deserialize(serialized)
+        if serialized[CLASS_KEY].constantize == Array
+          serialized[ATTRIBUTES_KEY].collect { |x| deserialize(x) }
+        else
+          value = serialized[CLASS_KEY].constantize.allocate
+          value.init_with('attributes' => serialized[ATTRIBUTES_KEY])
+          value
+        end
+      end
+    end
+  end
+  
   module ClassMethods
     @@nil_sentinel = :_nil
 
@@ -51,6 +80,9 @@ module ActsAsCached
       misses = keys - hits.keys
       hits.each { |k, v| hits[k] = nil if v == @@nil_sentinel }
 
+      # De-serialize the hits.
+      hits.each { |k, v| hits[k] = Util.deserialize(v) unless v.nil? }
+      
       # Return our hash if there are no misses
       return hits.values.index_by(&:cache_id) if misses.empty?
 
@@ -75,7 +107,7 @@ module ActsAsCached
 
     def set_cache(cache_id, value, options = nil)
       v = value.nil? ? @@nil_sentinel : value
-      Rails.cache.write(cache_key(cache_id), v, options)
+      Rails.cache.write(cache_key(cache_id), Util.serialize(v), options)
       value
     end
 
@@ -151,7 +183,8 @@ module ActsAsCached
     alias :is_cached? :cached?
 
     def fetch_cache(cache_id)
-      Rails.cache.read(cache_key(cache_id))
+      record = Rails.cache.read(cache_key(cache_id))
+      record = Util.deserialize(record) unless record.nil?
     end
 
     def fetch_cachable_data(cache_id = nil)
